@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1
 FROM --platform=$BUILDPLATFORM rust:bullseye AS builder
 
-# Build-Argumente für Cross-Compilation
+# Build arguments for cross-compilation
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 
-# Cross-Compilation Tools installieren
+# Cross-compilation tools
 RUN apt-get update && \
     apt-get install -y \
     build-essential \
@@ -16,18 +16,18 @@ RUN apt-get update && \
     crossbuild-essential-armhf && \
     rm -rf /var/lib/apt/lists/*
 
-# Rust Target für ARM hinzufügen
+# Add Rust target for ARM
 RUN rustup target add armv7-unknown-linux-gnueabihf
 
-# Bindgen installieren (wird von aws-lc-sys benötigt)
+# Install bindgen (required by aws-lc-sys)
 RUN cargo install bindgen-cli
 
 WORKDIR /builder
 
-# Alle Source-Dateien kopieren
+# Copy all source files
 COPY . .
 
-# Cross-Compilation Environment setzen
+# Set cross-compilation environment
 ENV CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc \
     CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc \
     CXX_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-g++ \
@@ -36,23 +36,39 @@ ENV CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc \
     PKG_CONFIG_ALLOW_CROSS=1 \
     BINDGEN_EXTRA_CLANG_ARGS="--sysroot=/usr/arm-linux-gnueabihf"
 
-# Binary kompilieren für ARM v7
+# Compile binary for ARM v7
 RUN cargo build -p komodo_periphery --release --target armv7-unknown-linux-gnueabihf
 
-# Optional: Binary strippen mit ARM strip tool
+# Strip binary with ARM strip tool
 RUN arm-linux-gnueabihf-strip /builder/target/armv7-unknown-linux-gnueabihf/release/periphery
 
-# Nichts kopieren, direkt aus dem Target-Verzeichnis verwenden
+# Runtime Image - IMPORTANT: must specify platform for QEMU
+FROM --platform=$TARGETPLATFORM debian:bullseye-slim
 
-# Runtime Image
-FROM debian:bullseye-slim
+ARG TARGETPLATFORM
 
-# Runtime dependencies
+# Install base dependencies first
 RUN apt-get update && \
-    apt-get install -y ca-certificates libssl1.1 && \
+    apt-get install -y \
+    ca-certificates \
+    libssl1.1 \
+    curl \
+    gnupg \
+    lsb-release
+
+# Add Docker repository for ARM
+RUN mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
+    echo "deb [arch=armhf signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bullseye stable" > /etc/apt/sources.list.d/docker.list
+
+# Install Docker CLI and Docker Compose
+RUN apt-get update && \
+    apt-get install -y \
+    docker-ce-cli \
+    docker-compose-plugin && \
     rm -rf /var/lib/apt/lists/*
 
-# Binary aus Builder-Stage kopieren - heißt "periphery" nicht "komodo_periphery"!
+# Copy binary from builder stage
 COPY --from=builder /builder/target/armv7-unknown-linux-gnueabihf/release/periphery /usr/local/bin/periphery
 
 WORKDIR /app

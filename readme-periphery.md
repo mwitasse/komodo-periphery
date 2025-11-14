@@ -1,17 +1,17 @@
-Docker Cross-Compilation Build Guide for Komodo Periphery
-Guide to building an ARM v7 Docker image on macOS using Colima and QEMU.
+# Docker Cross-Compilation Build Guide for Komodo Periphery
 
-Prerequisites
-macOS
+Guide for building an ARM v7 Docker image on macOS using Colima and QEMU.
 
-Colima installed and running
+## Prerequisites
 
-Docker CLI installed
+- macOS
+- Colima installed and running
+- Docker CLI installed
+- Git
 
-Git
+## 1. Colima Setup
 
-1. Colima Setup
-bash
+```bash
 # Stop Colima (if running)
 colima stop
 
@@ -20,27 +20,36 @@ colima start --cpu 4 --memory 8 --disk 100
 
 # Check Docker context
 docker context list
-2. Set up QEMU for Cross-Platform Builds
-bash
+```
+
+## 2. Set up QEMU for Cross-Platform Builds
+
+```bash
 # Install QEMU emulation for ARM
 docker run --privileged --rm tonistiigi/binfmt --install all
 
-# Create a multi-platform builder
+# Create multi-platform builder
 docker buildx create --name armbuilder --driver docker-container --use
 
-# Initialize the builder
+# Initialize builder
 docker buildx inspect armbuilder --bootstrap
-3. Clone the Repository
-text
-# Clone the Komodo repository
+```
+
+## 3. Clone Repository
+
+```bash
+# Clone Komodo repository
 git clone https://github.com/moghtech/komodo.git
 
-# Change to the directory
+# Change to directory
 cd komodo
-4. Create Dockerfile
-Create a Dockerfile with the following content:
+```
 
-text
+## 4. Create Dockerfile
+
+Create a `Dockerfile` with the following content:
+
+```dockerfile
 # syntax=docker/dockerfile:1
 FROM --platform=$BUILDPLATFORM rust:bullseye AS builder
 
@@ -85,12 +94,27 @@ RUN cargo build -p komodo_periphery --release --target armv7-unknown-linux-gnuea
 # Optional: Strip binary with ARM strip tool
 RUN arm-linux-gnueabihf-strip /builder/target/armv7-unknown-linux-gnueabihf/release/periphery
 
-# Runtime image
+# Runtime Image
 FROM debian:bullseye-slim
 
-# Runtime dependencies
+# Runtime dependencies including Docker and Docker Compose
 RUN apt-get update && \
-    apt-get install -y ca-certificates libssl1.1 && \
+    apt-get install -y \
+    ca-certificates \
+    libssl1.1 \
+    curl \
+    gnupg \
+    lsb-release && \
+    # Add Docker repository
+    mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
+    echo "deb [arch=armhf signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bullseye stable" > /etc/apt/sources.list.d/docker.list && \
+    # Install Docker
+    apt-get update && \
+    apt-get install -y \
+    docker-ce-cli \
+    docker-compose-plugin && \
+    # Cleanup
     rm -rf /var/lib/apt/lists/*
 
 # Copy binary from builder stage
@@ -99,8 +123,11 @@ COPY --from=builder /builder/target/armv7-unknown-linux-gnueabihf/release/periph
 WORKDIR /app
 
 ENTRYPOINT ["periphery"]
-5. Create .dockerignore (optional)
-text
+```
+
+## 5. Create .dockerignore (optional)
+
+```bash
 cat > .dockerignore << 'EOF'
 target/
 .git/
@@ -111,29 +138,44 @@ README.md
 .DS_Store
 node_modules/
 EOF
-6. Build Image
-bash
-# Build for ARM v7 (e.g., Raspberry Pi 2/3)
+```
+
+## 6. Build Image
+
+```bash
+# Build for ARM v7 (e.g. Raspberry Pi 2/3)
 docker buildx build --platform linux/arm/v7 -t komodo-periphery:armv7 --load .
 
 # With build log for debugging
 docker buildx build --platform linux/arm/v7 --progress=plain -t komodo-periphery:armv7 --load . 2>&1 | tee build.log
-Note: The build may take 10-30 minutes due to cross-compilation!
+```
 
-7. Test Image
-bash
-# List images
+**Note:** Build may take 10-30 minutes due to cross-compilation!
+
+## 7. Test Image
+
+```bash
+# Show image
 docker images komodo-periphery
 
-# Test run container
+# Start container for testing
 docker run -it komodo-periphery:armv7 --help
-8. Read Version from Cargo.toml
-text
-# Get version
+
+# Test with Docker socket access (periphery needs this at runtime)
+docker run -v /var/run/docker.sock:/var/run/docker.sock komodo-periphery:armv7
+```
+
+## 8. Read Version from Cargo.toml
+
+```bash
+# Determine version
 VERSION=$(grep "^version" Cargo.toml | head -1 | cut -d'"' -f2)
 echo "Version: $VERSION"
-9. Push to Docker Hub
-bash
+```
+
+## 9. Push to Docker Hub
+
+```bash
 # Login to Docker Hub
 docker login
 
@@ -147,8 +189,11 @@ docker tag komodo-periphery:armv7 $USERNAME/komodo-periphery:latest-armv7
 # Push to Docker Hub
 docker push $USERNAME/komodo-periphery:$VERSION-armv7
 docker push $USERNAME/komodo-periphery:latest-armv7
-10. Export Image (Alternative to Docker Hub)
-text
+```
+
+## 10. Export Image (Alternative to Docker Hub)
+
+```bash
 # Export as TAR for manual transfer
 docker save komodo-periphery:armv7 | gzip > komodo-periphery-armv7.tar.gz
 
@@ -158,14 +203,37 @@ scp komodo-periphery-armv7.tar.gz pi@raspberry-pi-ip:/home/pi/
 # Load on Pi
 ssh pi@raspberry-pi-ip
 docker load -i komodo-periphery-armv7.tar.gz
-Troubleshooting
-TLS/Certificate Errors
-text
+```
+
+## Running the Container
+
+Since periphery needs Docker at runtime, always mount the Docker socket:
+
+```bash
+# Run with Docker socket
+docker run -v /var/run/docker.sock:/var/run/docker.sock komodo-periphery:armv7
+
+# With docker-compose.yml
+services:
+  periphery:
+    image: komodo-periphery:armv7
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+```
+
+## Troubleshooting
+
+### TLS/Certificate Errors
+
+```bash
 # Restart Colima
 colima stop
 colima start --network-address
-"exec format error"
-bash
+```
+
+### "exec format error"
+
+```bash
 # Reinstall QEMU
 docker run --privileged --rm tonistiigi/binfmt --install all
 
@@ -173,39 +241,47 @@ docker run --privileged --rm tonistiigi/binfmt --install all
 docker buildx rm armbuilder
 docker buildx create --name armbuilder --driver docker-container --use
 docker buildx inspect armbuilder --bootstrap
-Clear Build Cache
-text
-# Full rebuild without cache
+```
+
+### Clear Build Cache
+
+```bash
+# Complete rebuild without cache
 docker buildx build --no-cache --platform linux/arm/v7 -t komodo-periphery:armv7 --load .
-Clean Up Local Images
-text
-# List all komodo images
+```
+
+### Clean up Local Images
+
+```bash
+# Show all komodo images
 docker images | grep komodo
 
 # Remove unused images
 docker image prune -a
-Additional Architectures
-For ARM 64-bit (Raspberry Pi 4/5)
-bash
+```
+
+## Building for Other Architectures
+
+```bash
+# For ARM 64-bit (Raspberry Pi 4/5)
+# Note: Adjust Docker repository arch in Dockerfile from 'armhf' to 'arm64'
 docker buildx build --platform linux/arm64 -t komodo-periphery:arm64 --load .
-For AMD64 (Standard x86_64)
-bash
+
+# For AMD64 (standard x86_64)
+# Note: Adjust Docker repository arch in Dockerfile from 'armhf' to 'amd64'
 docker buildx build --platform linux/amd64 -t komodo-periphery:amd64 --load .
-Multi-Platform Build (multiple at once)
-text
-docker buildx build \
-  --platform linux/arm/v7,linux/arm64,linux/amd64 \
-  -t $USERNAME/komodo-periphery:$VERSION \
-  --push .
-Useful Commands
-bash
-# List all Docker Buildx builders
+```
+
+## Useful Commands
+
+```bash
+# Show all Docker buildx builders
 docker buildx ls
 
 # Remove builder
 docker buildx rm armbuilder
 
-# List all images
+# Show all images
 docker images
 
 # Remove specific image
@@ -216,9 +292,10 @@ colima status
 
 # Switch Docker context
 docker context use colima
-Links
-Komodo Repository
+```
 
-Docker Buildx Documentation
+## Links
 
-Colima GitHub
+- [Komodo Repository](https://github.com/moghtech/komodo)
+- [Docker Buildx Documentation](https://docs.docker.com/buildx/working-with-buildx/)
+- [Colima GitHub](https://github.com/abiosoft/colima)
