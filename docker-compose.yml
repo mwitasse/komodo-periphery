@@ -1,0 +1,75 @@
+services:
+
+  # Tailscale Client
+
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: tailscale
+    hostname:   # fill in with unique name per server
+    restart: unless-stopped
+    labels:
+      komodo.skip:
+    network_mode: bridge
+    ports:
+      - 8120:8120     # Komodo Periphery Container
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_MODULE
+    volumes:
+      - /dev/net/tun:/dev/net/tun
+      - ./tailscale_data:/var/lib/tailscale
+      - ./entrypoint.sh:/entrypoint.sh:ro
+    environment:
+      - TS_AUTHKEY=${TAILSCALE_AUTH_KEY}  # generated via Headscale
+      - TS_HOSTNAME= # fill in with unique name per server
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_LOGIN_SERVER=
+    command: ["/entrypoint.sh"]
+    healthcheck:
+      test: ["CMD", "tailscale", "status", "--json"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+
+  ## Deploy Periphery container using this block,
+  ## or deploy the Periphery binary with systemd using 
+  ## https://github.com/moghtech/komodo/tree/main/scripts
+
+  periphery:
+    image: mwitassek/komodo-periphery:latest-armv7  # using the built image for RPi2/3 armv7 architecture
+    build:
+      context: .
+      dockerfile: Dockerfile
+      platforms:
+        - linux/arm/v7
+      #args:
+      #  - BUILDPLATFORM=linux/arm/v7
+
+    #image: ghcr.io/moghtech/komodo-periphery:${COMPOSE_KOMODO_IMAGE_TAG:-latest}
+    container_name: komodo-periphery
+    network_mode: "service:tailscale"  # connects via tailscale only
+    labels:
+      komodo.skip: # Prevent Komodo from stopping with StopAllContainers
+    restart: unless-stopped
+    env_file: ./.env
+    volumes:
+      ## Mount external docker socket
+      - /var/run/docker.sock:/var/run/docker.sock
+      ## Allow Periphery to see processes outside of container
+      - /proc:/proc
+      ## Specify the Periphery agent root directory.
+      ## Must be the same inside and outside the container,
+      ## or docker will get confused. See https://github.com/moghtech/komodo/discussions/180.
+      ## Default: /etc/komodo.
+      - ${PERIPHERY_ROOT_DIRECTORY:-/etc/komodo}:${PERIPHERY_ROOT_DIRECTORY:-/etc/komodo}
+      - ./config:/app/config
+    environment:
+      - PERIPHERY_PORT=8120
+      - PERIPHERY_PASSKEY=${KOMODO_PASSKEY}
+      - RUST_LOG=info
+    depends_on:
+      tailscale:
+        condition: service_healthy

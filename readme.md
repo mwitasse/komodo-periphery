@@ -23,6 +23,7 @@ there are no warranties. Use at your own risk.
 
 ## Links
 
+- [build armv7 periphery with QEMU](https://github.com/mwitasse/komodo-periphery/blob/main/readme-periphery.md)
 - [periphery setup](https://github.com/moghtech/komodo/blob/main/scripts/readme.md)
 - [roadmap](https://github.com/moghtech/komodo/blob/main/roadmap.md)
 
