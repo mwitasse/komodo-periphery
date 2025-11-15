@@ -69,4 +69,4 @@ COPY --from=builder /builder/target/armv7-unknown-linux-gnueabihf/release/periph
 
 WORKDIR /app
 
-ENTRYPOINT ["periphery"]
+CMD ["periphery"]
