@@ -144,13 +144,15 @@ EOF
 
 ```bash
 # Build for ARM v7 (e.g. Raspberry Pi 2/3)
-docker buildx build --platform linux/arm/v7 -t komodo-periphery:armv7 --load .
+docker-buildx build --platform linux/arm/v7 -t komodo-periphery:armv7 --load .
 
 # With build log for debugging
-docker buildx build --platform linux/arm/v7 --progress=plain -t komodo-periphery:armv7 --load . 2>&1 | tee build.log
+docker-buildx build --platform linux/arm/v7 --progress=plain -t komodo-periphery:armv7 --load . 2>&1 | tee build.log
 ```
 
 **Note:** Build may take 10-30 minutes due to cross-compilation!
+
+**Docker Version:** This image includes Docker CLI 29.0.1 and Docker Compose v2.40.3
 
 ## 7. Test Image
 
@@ -182,12 +184,12 @@ docker login
 # Replace USERNAME with your Docker Hub username
 USERNAME="yourusername"
 
-# Tag image with version
-docker tag komodo-periphery:armv7 $USERNAME/komodo-periphery:$VERSION-armv7
+# Tag image with version and Docker version
+docker tag komodo-periphery:armv7 $USERNAME/komodo-periphery:$VERSION-armv7-docker29.0.1
 docker tag komodo-periphery:armv7 $USERNAME/komodo-periphery:latest-armv7
 
 # Push to Docker Hub
-docker push $USERNAME/komodo-periphery:$VERSION-armv7
+docker push $USERNAME/komodo-periphery:$VERSION-armv7-docker29.0.1
 docker push $USERNAME/komodo-periphery:latest-armv7
 ```
 

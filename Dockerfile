@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
+# Build on native platform, cross-compile for target
 FROM --platform=$BUILDPLATFORM rust:bullseye AS builder
 
-# Build arguments for cross-compilation
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 
@@ -42,33 +42,29 @@ RUN cargo build -p komodo_periphery --release --target armv7-unknown-linux-gnuea
 # Strip binary with ARM strip tool
 RUN arm-linux-gnueabihf-strip /builder/target/armv7-unknown-linux-gnueabihf/release/periphery
 
-# Runtime Image - IMPORTANT: must specify platform for QEMU
-FROM --platform=$TARGETPLATFORM debian:bullseye-slim
+# Intermediate stage: Download everything on native platform
+FROM --platform=$BUILDPLATFORM alpine:latest AS downloader
 
-ARG TARGETPLATFORM
+RUN apk add --no-cache curl
 
-# Install base dependencies first
-RUN apt-get update && \
-    apt-get install -y \
-    ca-certificates \
-    libssl1.1 \
-    curl \
-    gnupg \
-    lsb-release
+# Download Docker CLI for ARM v7 (latest version 29.0.1)
+RUN curl -fsSL https://download.docker.com/linux/static/stable/armhf/docker-29.0.1.tgz -o /tmp/docker.tgz && \
+    tar xzf /tmp/docker.tgz -C /tmp && \
+    chmod +x /tmp/docker/docker
 
-# Add Docker repository for ARM
-RUN mkdir -p /etc/apt/keyrings && \
-    curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
-    echo "deb [arch=armhf signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bullseye stable" > /etc/apt/sources.list.d/docker.list
+# Download Docker Compose for ARM v7 (latest version v2.40.3)
+RUN mkdir -p /tmp/cli-plugins && \
+    curl -fsSL https://github.com/docker/compose/releases/download/v2.40.3/docker-compose-linux-armv7 -o /tmp/cli-plugins/docker-compose && \
+    chmod +x /tmp/cli-plugins/docker-compose
 
-# Install Docker CLI and Docker Compose
-RUN apt-get update && \
-    apt-get install -y \
-    docker-ce-cli \
-    docker-compose-plugin && \
-    rm -rf /var/lib/apt/lists/*
+# Final runtime - use pre-built ARM image that already has everything
+FROM arm32v7/debian:bullseye-slim
 
-# Copy binary from builder stage
+# Copy Docker binaries from downloader (no apt-get needed!)
+COPY --from=downloader /tmp/docker/docker /usr/local/bin/
+COPY --from=downloader /tmp/cli-plugins /usr/local/lib/docker/cli-plugins/
+
+# Copy periphery binary
 COPY --from=builder /builder/target/armv7-unknown-linux-gnueabihf/release/periphery /usr/local/bin/periphery
 
 WORKDIR /app
