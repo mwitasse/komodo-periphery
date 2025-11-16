@@ -41,7 +41,7 @@ RUN cargo build -p komodo_periphery --release --target armv7-unknown-linux-gnuea
 # Strip binary
 RUN arm-linux-gnueabihf-strip /builder/target/armv7-unknown-linux-gnueabihf/release/periphery
 
-# Download Docker binaries and debs on native platform
+# Download Docker binaries on native platform
 FROM --platform=$BUILDPLATFORM debian:bullseye-slim AS downloader
 
 RUN apt-get update && \
@@ -57,19 +57,8 @@ RUN mkdir -p /tmp/cli-plugins && \
     curl -fsSL https://github.com/docker/compose/releases/download/v2.40.3/docker-compose-linux-armv7 -o /tmp/cli-plugins/docker-compose && \
     chmod +x /tmp/cli-plugins/docker-compose
 
-# Download ARM Debian packages
-RUN mkdir -p /tmp/debs && \
-    cd /tmp/debs && \
-    curl -fsSL http://ftp.debian.org/debian/pool/main/o/openssl/openssl_1.1.1w-0+deb11u2_armhf.deb -o openssl.deb && \
-    curl -fsSL http://ftp.debian.org/debian/pool/main/o/openssl/libssl1.1_1.1.1w-0+deb11u2_armhf.deb -o libssl.deb && \
-    curl -fsSL http://ftp.debian.org/debian/pool/main/c/ca-certificates/ca-certificates_20210119_all.deb -o ca-certificates.deb
-
-# Runtime image
+# Runtime image - already includes openssl, libssl and ca-certificates
 FROM arm32v7/debian:bullseye-slim
-
-# Install packages from debs
-COPY --from=downloader /tmp/debs/*.deb /tmp/
-RUN dpkg -i /tmp/*.deb && rm /tmp/*.deb
 
 # Copy periphery binary
 COPY --from=builder /builder/target/armv7-unknown-linux-gnueabihf/release/periphery /usr/local/bin/periphery
