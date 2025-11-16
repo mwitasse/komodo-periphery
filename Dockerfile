@@ -41,10 +41,12 @@ RUN cargo build -p komodo_periphery --release --target armv7-unknown-linux-gnuea
 # Strip binary
 RUN arm-linux-gnueabihf-strip /builder/target/armv7-unknown-linux-gnueabihf/release/periphery
 
-# Download Docker binaries on native platform
-FROM --platform=$BUILDPLATFORM alpine:latest AS downloader
+# Download Docker binaries and debs on native platform
+FROM --platform=$BUILDPLATFORM debian:bullseye-slim AS downloader
 
-RUN apk add --no-cache curl
+RUN apt-get update && \
+    apt-get install -y curl && \
+    rm -rf /var/lib/apt/lists/*
 
 # Download Docker CLI 29.0.1 for ARM v7
 RUN curl -fsSL https://download.docker.com/linux/static/stable/armhf/docker-29.0.1.tgz -o /tmp/docker.tgz && \
@@ -55,11 +57,19 @@ RUN mkdir -p /tmp/cli-plugins && \
     curl -fsSL https://github.com/docker/compose/releases/download/v2.40.3/docker-compose-linux-armv7 -o /tmp/cli-plugins/docker-compose && \
     chmod +x /tmp/cli-plugins/docker-compose
 
-# Download openssl binary for ARM v7
-RUN curl -fsSL https://github.com/openssl/openssl/releases/download/openssl-3.0.15/openssl-3.0.15.tar.gz -o /tmp/openssl.tar.gz
+# Download ARM Debian packages
+RUN mkdir -p /tmp/debs && \
+    cd /tmp/debs && \
+    curl -fsSL http://ftp.debian.org/debian/pool/main/o/openssl/openssl_1.1.1w-0+deb11u2_armhf.deb -o openssl.deb && \
+    curl -fsSL http://ftp.debian.org/debian/pool/main/o/openssl/libssl1.1_1.1.1w-0+deb11u2_armhf.deb -o libssl.deb && \
+    curl -fsSL http://ftp.debian.org/debian/pool/main/c/ca-certificates/ca-certificates_20210119_all.deb -o ca-certificates.deb
 
-# Runtime image - keep it minimal and close to official
+# Runtime image
 FROM arm32v7/debian:bullseye-slim
+
+# Install packages from debs
+COPY --from=downloader /tmp/debs/*.deb /tmp/
+RUN dpkg -i /tmp/*.deb && rm /tmp/*.deb
 
 # Copy periphery binary
 COPY --from=builder /builder/target/armv7-unknown-linux-gnueabihf/release/periphery /usr/local/bin/periphery
@@ -68,7 +78,17 @@ COPY --from=builder /builder/target/armv7-unknown-linux-gnueabihf/release/periph
 COPY --from=downloader /tmp/docker/docker /usr/local/bin/docker
 COPY --from=downloader /tmp/cli-plugins/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
 
+# Set environment variables matching official image
+ENV PERIPHERY_CONFIG_PATHS=/config
+ENV PERIPHERY_PRIVATE_KEY=file:/config/keys/periphery.key
+
+# Create config directory
+RUN mkdir -p /config/keys
+
+# Expose port
+EXPOSE 8120
+
 WORKDIR /root
 
-# Match official image
+# Match official image exactly
 CMD ["periphery"]
